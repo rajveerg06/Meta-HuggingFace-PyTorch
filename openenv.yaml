@@ -1,0 +1,44 @@
+name: invoice_receipt_openenv
+version: 1.0.0
+description: OpenEnv-compatible environment for invoice and receipt document understanding.
+entrypoint: env.openenv_env:OpenEnvInvoiceEnv
+api:
+  reset: /reset
+  step: /step
+  state: /state
+observation:
+  fields:
+    - sample_id
+    - difficulty
+    - ocr_text
+    - predicted_document_type
+    - extracted_fields.vendor_name
+    - extracted_fields.total_amount
+    - extracted_fields.date
+    - validation_passed
+    - progress
+    - steps_taken
+    - max_steps
+    - available_actions
+action_space:
+  actions:
+    - classify_document
+    - extract_fields
+    - validate_fields
+    - finish
+reward:
+  range: [0.0, 1.0]
+  scoring:
+    - classification_accuracy
+    - extraction_accuracy
+    - completeness
+tasks:
+  - id: classify-document
+    difficulty: easy
+    objective: Classify invoice vs receipt
+  - id: extract-key-fields
+    difficulty: medium
+    objective: Extract vendor name, total amount, and date
+  - id: full-pipeline
+    difficulty: hard
+    objective: Classify + extract + validate
