@@ -1,20 +1,42 @@
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
 .Python
 .venv/
 venv/
+env/
 *.egg-info/
 dist/
 build/
+.eggs/
+
+# Testing
 .pytest_cache/
 htmlcov/
 .coverage
+.tox/
+
+# IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+
+# Git
 .git/
 .gitignore
-*.log
+
+# Docs
+*.md
+!README.md
+
+# Secrets
 .env
+
+# Logs
+*.log
+
+# OS
 .DS_Store
 Thumbs.db

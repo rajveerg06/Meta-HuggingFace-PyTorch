@@ -1,3 +1,6 @@
-from .baseline_agent import BaselineHeuristicAgent, run_benchmark
+from __future__ import annotations
 
-__all__ = ["BaselineHeuristicAgent", "run_benchmark"]
+from .baseline_agent import BaselineHeuristicAgent, run_benchmark
+from .openai_agent import OpenAIAgent
+
+__all__ = ["BaselineHeuristicAgent", "OpenAIAgent", "run_benchmark"]
