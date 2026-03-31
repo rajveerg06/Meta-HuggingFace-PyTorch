@@ -160,7 +160,7 @@ def run_benchmark(
                 _run_openai_episode(env, agent, obs, difficulty)
 
             # Always call finish at the end
-            state = env.step(Action(action_type=ActionType.FINISH, payload={}))
+            state = env.step_state(Action(action_type=ActionType.FINISH, payload={}))
             elapsed_ms = round((time.perf_counter() - t0) * 1000, 1)
 
             episodes.append(
@@ -216,7 +216,7 @@ def _run_heuristic_episode(
 
     if difficulty in {"easy", "hard"}:
         doc_type = agent.classify_document(obs.ocr_text)
-        state = env.step(
+        state = env.step_state(
             Action(
                 action_type=ActionType.CLASSIFY_DOCUMENT,
                 payload={"document_type": doc_type},
@@ -226,7 +226,7 @@ def _run_heuristic_episode(
 
     if difficulty in {"medium", "hard"}:
         fields = agent.extract_fields(obs.ocr_text)
-        state = env.step(
+        state = env.step_state(
             Action(
                 action_type=ActionType.EXTRACT_FIELDS,
                 payload={"fields": fields},
@@ -234,7 +234,7 @@ def _run_heuristic_episode(
         )
 
     if difficulty == "hard":
-        env.step(
+        env.step_state(
             Action(
                 action_type=ActionType.VALIDATE_FIELDS,
                 payload={"is_valid": agent.validate_fields(fields)},
@@ -253,7 +253,7 @@ def _run_openai_episode(
 
     if difficulty in {"easy", "hard"}:
         doc_type = agent.classify_document(obs.ocr_text)
-        state = env.step(
+        state = env.step_state(
             Action(
                 action_type=ActionType.CLASSIFY_DOCUMENT,
                 payload={"document_type": doc_type},
@@ -263,7 +263,7 @@ def _run_openai_episode(
 
     if difficulty in {"medium", "hard"}:
         fields = agent.extract_fields(obs.ocr_text)
-        env.step(
+        env.step_state(
             Action(
                 action_type=ActionType.EXTRACT_FIELDS,
                 payload={"fields": fields},
@@ -271,7 +271,7 @@ def _run_openai_episode(
         )
 
     if difficulty == "hard":
-        env.step(
+        env.step_state(
             Action(
                 action_type=ActionType.VALIDATE_FIELDS,
                 payload={"is_valid": agent.validate_fields(fields)},

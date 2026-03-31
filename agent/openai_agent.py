@@ -54,16 +54,20 @@ class OpenAIAgent:
             raise ImportError(
                 "openai package not installed. Run: pip install openai"
             )
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError(
-                "OPENAI_API_KEY environment variable is not set. "
+                "HF_TOKEN or OPENAI_API_KEY environment variable is not set. "
                 "Either set it or use BaselineHeuristicAgent instead."
             )
-        self._client = OpenAI(api_key=api_key)
-        self._model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        base_url = os.getenv("API_BASE_URL")
+        if base_url:
+            self._client = OpenAI(api_key=api_key, base_url=base_url)
+        else:
+            self._client = OpenAI(api_key=api_key)
+        self._model = model or os.getenv("MODEL_NAME") or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         self._temperature = temperature
-        logger.info("OpenAIAgent initialised with model=%s", self._model)
+        logger.info("OpenAIAgent initialised with model=%s base_url=%s", self._model, base_url or "default")
 
     def classify_document(self, text: str) -> str:
         """Classify OCR text as 'invoice' or 'receipt' using the LLM."""

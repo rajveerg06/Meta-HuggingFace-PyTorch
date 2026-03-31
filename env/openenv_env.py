@@ -173,7 +173,7 @@ class OpenEnvInvoiceEnv:
 
         return EpisodeState(observation=self._observation(), reward=self._last_reward)
 
-    def step(self, action: Action) -> EpisodeState:
+    def step(self, action: Action) -> tuple[Observation, Reward, bool, Dict[str, Any]]:
         """
         Execute one action in the current episode.
 
@@ -181,12 +181,13 @@ class OpenEnvInvoiceEnv:
             action: Action to execute (action_type + payload).
 
         Returns:
-            EpisodeState after the action.
+            (observation, reward, done, info)
         """
         if self._sample is None:
             raise RuntimeError("Environment has not been reset. Call reset() first.")
         if self._done:
-            return EpisodeState(observation=self._observation(), reward=self._last_reward)
+            obs = self._observation()
+            return obs, self._last_reward, self._done, dict(obs.info)
 
         self._steps_taken += 1
         self._last_action = action.action_type
@@ -244,7 +245,13 @@ class OpenEnvInvoiceEnv:
             }
         )
 
-        return EpisodeState(observation=self._observation(), reward=self._last_reward)
+        obs = self._observation()
+        return obs, self._last_reward, self._done, dict(obs.info)
+
+    def step_state(self, action: Action) -> EpisodeState:
+        """Compatibility wrapper returning EpisodeState for existing callers."""
+        observation, reward, _done, _info = self.step(action)
+        return EpisodeState(observation=observation, reward=reward)
 
     def state(self) -> EpisodeState:
         """Return current episode state without advancing the environment."""

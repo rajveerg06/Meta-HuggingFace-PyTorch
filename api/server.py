@@ -194,7 +194,7 @@ def step(req: StepRequest) -> EpisodeState:
         action.payload: action-specific parameters
     """
     try:
-        return _get_env().step(req.action)
+        return _get_env().step_state(req.action)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 

@@ -1,341 +1,210 @@
-# OpenEnv Invoice/Receipt AI Environment
+# OpenEnv Round 1 — Invoice & Receipt Understanding Environment
 
-[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.116-green.svg)](https://fastapi.tiangolo.com)
-[![Pydantic](https://img.shields.io/badge/Pydantic-v2-orange.svg)](https://docs.pydantic.dev)
-[![Docker](https://img.shields.io/badge/Docker-ready-blue.svg)](https://docker.com)
-[![Hugging Face Spaces](https://img.shields.io/badge/HF%20Spaces-Docker-yellow.svg)](https://huggingface.co/spaces)
-
-Production-quality OpenEnv-compatible Python environment for AI-driven invoice and receipt document understanding.
+[![OpenEnv Compliant](https://img.shields.io/badge/OpenEnv-Round%201%20Compliant-blue)](openenv.yaml)
+[![Python 3.11](https://img.shields.io/badge/Python-3.11-green)](https://python.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 ---
 
-## Problem Description
+## Problem Statement
 
-This project simulates a real-world document processing pipeline where an AI agent must:
+Automated processing of financial documents (invoices and receipts) is a core
+challenge in accounts-payable, procurement, and audit workflows. OCR pipelines
+produce raw text with inconsistent formatting, varied date/currency conventions
+and noisy layouts — making accurate field extraction non-trivial for both rule-
+based systems and language models.
 
-1. **Classify** an incoming document as `invoice` or `receipt`
-2. **Extract** key fields from OCR text:
-   - vendor name
-   - total amount (currency-agnostic, multi-format)
-   - date (multi-format normalisation)
-3. **Validate** extraction quality
-4. **Finish** with deterministic grading and reward shaping
-
-The environment exposes a full OpenEnv API (`reset`, `step`, `state`) backed by a FastAPI service for external evaluators. A Gymnasium-compatible metadata interface (`action_space`, `observation_space`) is also included.
+This environment benchmarks an agent's ability to process that raw OCR text
+through a structured, multi-step pipeline: classifying the document type,
+extracting key fields, and validating the result.
 
 ---
 
-## Project Structure
+## Real-World Use Case
 
-```
-env/                  OpenEnv environment, dataset loading, reward logic
-  openenv_env.py      Core environment (reset/step/state + render/history)
-  dataset_loader.py   JSONL loader with split/source filtering
-  reward.py           Reward shaping with difficulty boosts and loop penalties
-  image_processor.py  Optional OCR via pytesseract (graceful fallback)
+Enterprise finance back-offices handle thousands of invoices and receipts daily.
+Manual data entry is error-prone and expensive. An LLM-powered agent that can:
 
-models/               Pydantic v2 models
-  schemas.py          Action, Observation, Reward, EpisodeState, BenchmarkResult, ...
+1. **Classify** whether a document is an invoice or receipt
+2. **Extract** vendor name, total amount, and date
+3. **Validate** the extracted fields for completeness and structural correctness
 
-tasks/                Difficulty/task definitions
-  task_definitions.py Easy / Medium / Hard TaskDefinition objects
-
-graders/              Deterministic scoring
-  scoring.py          Per-field scores, fuzzy vendor matching, multi-format parsing
-
-agent/                Agents
-  baseline_agent.py   Heuristic regex-based agent + benchmark runner
-  openai_agent.py     LLM agent using GPT-4o-mini (requires OPENAI_API_KEY)
-
-api/                  FastAPI server
-  server.py           /reset /step /state /tasks /benchmark + more
-
-scripts/              Utilities
-  run_baseline.py     CLI benchmark runner (--agent, --seed, --episodes, --export)
-  generate_dataset.py Synthetic dataset generator
-
-tests/                Full test suite
-  test_env.py         Environment lifecycle tests
-  test_graders.py     Grader unit tests
-  test_api.py         FastAPI integration tests
-
-data/samples/         Bundled dataset (30 samples)
-  documents.jsonl     Real-world-inspired samples across SROIE, Invoice, RVL-CDIP
-```
+…can be directly integrated into ERP systems (SAP, Oracle, QuickBooks) to
+automate accounts-payable and reconciliation pipelines at scale.
 
 ---
 
-## Dataset Info
+## Environment Design
 
-The environment ships with a curated 30-sample dataset (`data/samples/documents.jsonl`) drawn from three sources:
+Implemented in [`env/openenv_env.py`](env/openenv_env.py) and fully compliant
+with the OpenEnv Round 1 specification.
 
-| Source | Type | Description |
-|---|---|---|
-| **SROIE** | Receipts | Scanned Malaysian/Asian retail receipts |
-| **Invoice Dataset** | Invoices | B2B invoices from multiple industries and currencies |
-| **RVL-CDIP Subset** | Mixed | Complex document images (OCR extracted) |
+### API Contract
 
-### Schema
+| Method | Signature | Returns |
+|--------|-----------|---------|
+| `reset()` | `difficulty`, `sample_index` | `EpisodeState` |
+| `step()` | `Action` | `(Observation, Reward, bool, dict)` |
+| `state()` | — | `EpisodeState` |
 
-```json
-{
-  "sample_id": "sroie-h-001",
-  "source_dataset": "sroie",
-  "split": "train",
-  "difficulty": "hard",
-  "document_type": "receipt",
-  "ocr_text": "JJ MART SDN BHD\n...",
-  "ground_truth": {
-    "vendor_name": "JJ MART SDN BHD",
-    "total_amount": "RM 6.00",
-    "date": "18/02/2024"
-  }
-}
-```
+### Action Space (Discrete, n=4)
 
-### Supported Kaggle Datasets
+| Action | Description |
+|--------|-------------|
+| `classify_document` | Predict whether the document is `invoice` or `receipt` |
+| `extract_fields` | Extract `vendor_name`, `total_amount`, `date` |
+| `validate_fields` | Assert extraction completeness and correctness |
+| `finish` | End episode and trigger final grader scoring |
 
-Drop these into the corresponding directories and the environment auto-loads them:
+### Observation Space
 
-| Directory | Dataset |
-|---|---|
-| `data/samples/` | Bundled starter dataset (used by default) |
-| `data/sroie/` | [SROIE 2019](https://rrc.cvc.uab.es/?ch=13) |
-| `data/invoice/` | [Invoice Dataset on Kaggle](https://www.kaggle.com/datasets) |
-| `data/rvl_cdip_subset/` | [RVL-CDIP](https://adamharley.com/rvl-cdip/) |
-| `data/generated/` | Output of `scripts/generate_dataset.py` |
+| Field | Type | Description |
+|-------|------|-------------|
+| `sample_id` | `str` | Unique document identifier |
+| `difficulty` | `"easy"\|"medium"\|"hard"` | Episode difficulty level |
+| `ocr_text` | `str` | Raw OCR text of the document |
+| `predicted_document_type` | `"invoice"\|"receipt"\|"unknown"` | Agent's current classification |
+| `extracted_fields` | `ExtractionFields` | `vendor_name`, `total_amount`, `date` |
+| `validation_passed` | `bool` | Whether the last validation succeeded |
+| `progress` | `float ∈ [0,1]` | Step progress through episode |
+| `steps_taken` | `int` | Steps executed so far |
+| `max_steps` | `int` | Maximum steps before timeout |
+| `available_actions` | `List[str]` | Legal next actions |
+| `last_action` | `Optional[str]` | Most recently executed action |
+| `done` | `bool` | Whether the episode has ended |
+| `info` | `dict` | Task objective and metadata |
+
+---
+
+## Reward & Grader Design
+
+### Step-Level Reward Shaping
+
+Defined in [`env/reward.py`](env/reward.py):
+
+| Condition | Reward |
+|-----------|--------|
+| Correct `classify_document` | +0.25 (×1.0–1.1 difficulty boost) |
+| Correct `extract_fields` (≥2/3 fields match) | +0.45 (×difficulty boost) |
+| Correct `validate_fields` | +0.20 |
+| `finish` action | +0.10 + **0.6 × grader_score** |
+| Wrong action | −0.10 |
+| Repeated action (loop) | −0.05 per repetition |
+| Timeout (max_steps exceeded) | −0.10 |
+
+### Deterministic Grader
+
+Defined in [`graders/scoring.py`](graders/scoring.py):
+
+| Difficulty | Formula |
+|------------|---------|
+| `easy` | `classification_accuracy` |
+| `medium` | `0.8 × extraction_accuracy + 0.2 × completeness` |
+| `hard` | `0.4 × classification_accuracy + 0.4 × extraction_accuracy + 0.2 × completeness` |
+
+- **Vendor name**: fuzzy similarity match (≥85 → 1.0, ≥70 → 0.5, else 0.0) via `rapidfuzz`
+- **Total amount**: currency-normalized float comparison with ±0.01 tolerance
+- **Date**: parsed across 7 common formats, compared as `datetime.date`
+- All scores clamped to `[0.0, 1.0]`
+
+---
+
+## Tasks
+
+Defined in [`tasks/task_definitions.py`](tasks/task_definitions.py):
+
+### Easy — `classify-document`
+
+> Given OCR text of a financial document, classify whether it is an **invoice**
+> or a **receipt**. Models must apply document-type reasoning over unstructured
+> text containing keywords, formatting patterns, and layout cues.
+
+Required actions: `classify_document → finish`
+
+### Medium — `extract-key-fields`
+
+> Extract **vendor name**, **total amount**, and **date** from the OCR text.
+> Models must handle varied formatting, currency symbols, international date
+> formats, and noisy OCR artifacts.
+
+Required actions: `extract_fields → finish`
+
+### Hard — `full-pipeline`
+
+> Perform the complete document processing pipeline: **classify** document type,
+> **extract** all key fields, and **validate** the extraction for completeness
+> and structural correctness. All steps must succeed for maximum score.
+
+Required actions: `classify_document → extract_fields → validate_fields → finish`
+
+---
+
+## Dataset
+
+30 realistic synthetic documents across 3 difficulty levels (10 each), drawn
+from three source datasets: `sroie`, `invoice_dataset`, `rvl_cdip_subset`.
+Balanced across `train`/`val`/`test` splits.
+
+Stored in [`data/samples/documents.jsonl`](data/samples/documents.jsonl).
 
 ---
 
 ## Setup
 
 ```bash
-# 1. Clone / enter the project
-cd Meta-HuggingFace-PyTorch
-
-# 2. Create virtual environment
+# 1. Create and activate virtual environment
 python -m venv .venv
-# Activate:
-.venv\Scripts\Activate.ps1   # Windows PowerShell
-# source .venv/bin/activate  # Linux/macOS
+.venv\Scripts\activate          # Windows
+source .venv/bin/activate       # Linux / macOS
 
-# 3. Install dependencies
+# 2. Install dependencies
 pip install -r requirements.txt
 
-# 4. Configure environment variables (optional)
-copy .env.example .env
-# Edit .env to add OPENAI_API_KEY if using the LLM agent
+# 3. Copy and configure environment variables
+copy .env.example .env          # Windows
+cp .env.example .env            # Linux / macOS
+# Edit .env and fill in: API_BASE_URL, MODEL_NAME, HF_TOKEN
 ```
 
 ---
 
-## Action Space
-
-| Action | Payload | Description |
-|---|---|---|
-| `classify_document` | `{"document_type": "invoice"|"receipt"}` | Classify the document type |
-| `extract_fields` | `{"fields": {"vendor_name": ..., "total_amount": ..., "date": ...}}` | Extract structured fields |
-| `validate_fields` | `{"is_valid": true|false}` | Validate completeness of extracted fields |
-| `finish` | `{}` | End the episode and collect final reward |
-
----
-
-## Observation Space
-
-Each observation contains:
-
-| Field | Type | Description |
-|---|---|---|
-| `sample_id` | str | Unique document identifier |
-| `difficulty` | easy/medium/hard | Task level |
-| `ocr_text` | str | Raw OCR text of the document |
-| `predicted_document_type` | str | Agent's current classification |
-| `extracted_fields` | object | Current extracted vendor/amount/date |
-| `validation_passed` | bool | Whether validation step passed |
-| `progress` | float [0,1] | Episode progress ratio |
-| `steps_taken` | int | Steps taken so far |
-| `max_steps` | int | Maximum steps before truncation |
-| `available_actions` | list | Actions currently allowed |
-| `last_action` | str | Previous action taken |
-| `done` | bool | True if episode is complete |
-| `info` | dict | Task objective, required actions, source, split |
-
----
-
-## Difficulty Levels
-
-| Level | Task | Grading |
-|---|---|---|
-| **Easy** | Classify invoice vs receipt | 100% classification accuracy |
-| **Medium** | Extract key fields | 80% extraction accuracy + 20% completeness |
-| **Hard** | Full pipeline: classify + extract + validate | 40% classification + 40% extraction + 20% completeness |
-
----
-
-## Graders
-
-Deterministic scoring in `[0.0, 1.0]` with per-field breakdown:
-
-- **Vendor name**: Fuzzy matching via `rapidfuzz` (exact=1.0, ≥85 ratio=1.0, ≥70=0.5, else=0.0)
-- **Total amount**: Currency-agnostic float comparison (±0.01 tolerance)
-- **Date**: Multi-format normalisation (ISO, DD/MM/YYYY, DD-MM-YYYY)
-
----
-
-## Reward Shaping
-
-| Event | Reward |
-|---|---|
-| Correct classify | +0.25 × difficulty_boost |
-| Wrong classify | -0.10 |
-| Correct extract (≥2/3 fields) | +0.45 × difficulty_boost |
-| Wrong extract | -0.10 |
-| Validate (correctly stated) | +0.20 |
-| Finish | +0.10 + 0.60 × grader_score |
-| Loop penalty | -0.05 per repeated action |
-| Max steps truncation | -0.10 |
-
----
-
-## Running the Baseline Agent
+## Run API Server
 
 ```bash
-# Heuristic agent (no API key needed)
-python scripts/run_baseline.py
-
-# With options
-python scripts/run_baseline.py --agent heuristic --episodes 5 --seed 42 --export json
-
-# OpenAI LLM agent (requires OPENAI_API_KEY in .env)
-python scripts/run_baseline.py --agent openai --episodes 3
+python main.py --host 0.0.0.0 --port 7860
 ```
 
-Example output:
-```
-  Running benchmark: agent=heuristic, seed=42, episodes_per_level=3
+Interactive docs available at: `http://localhost:7860/docs`
 
-╔══════════════════════════════════════════════════════════╗
-  OpenEnv Benchmark — Agent: HEURISTIC  |  seed=42
-╠══════════════════════════════════════════════════════════╣
-  DIFFICULTY     EPISODES  AVG SCORE                  BAR
-  ──────────────────────────────────────────────────────────
-  easy                  3     1.0000  ████████████████████
-  medium                3     0.9444  ██████████████████░░
-  hard                  3     0.9111  ██████████████████░░
-  ──────────────────────────────────────────────────────────
-  OVERALL               9     0.9518
-╚══════════════════════════════════════════════════════════╝
-```
+### Core Endpoints
 
-### Baseline Results (seed=42, 3 episodes/level)
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/reset` | Start a new episode |
+| `POST` | `/step` | Execute an action |
+| `GET` | `/state` | Read current state (non-destructive) |
+| `GET` | `/health` | Liveness check |
+| `GET` | `/tasks` | List all tasks |
 
-| Agent | Easy | Medium | Hard | Overall |
-|---|---|---|---|---|
-| Heuristic | 1.0000 | 0.9444 | 0.9111 | **0.9518** |
-| OpenAI (gpt-4o-mini) | ~1.0000 | ~0.9667 | ~0.9556 | **~0.9741** |
-
----
-
-## Running the API Server
+### Example Session
 
 ```bash
-python main.py
-# or with options:
-python main.py --port 7860 --reload
-```
-
-Interactive docs: **http://localhost:7860/docs**
-
-### API Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/health` | Liveness check + dataset stats |
-| GET | `/tasks` | List all tasks with sample counts |
-| GET | `/action_space` | Discrete action space descriptor |
-| GET | `/observation_space` | Observation space descriptor |
-| GET | `/openenv_spec` | openenv.yaml as JSON |
-| POST | `/reset` | Start a new episode |
-| POST | `/step` | Execute an action |
-| GET | `/state` | Current episode state |
-| GET | `/render` | Human-readable episode summary |
-| GET | `/history` | Full episode action history |
-| POST | `/benchmark` | Run a full benchmark |
-
-### cURL Examples
-
-```bash
-# Start a hard episode
-curl -X POST http://localhost:7860/reset \
+# Reset to easy episode
+curl -s -X POST http://localhost:7860/reset \
   -H "Content-Type: application/json" \
-  -d '{"difficulty": "hard", "sample_index": 0}'
+  -d '{"difficulty": "easy"}' | python -m json.tool
 
 # Classify the document
-curl -X POST http://localhost:7860/step \
+curl -s -X POST http://localhost:7860/step \
   -H "Content-Type: application/json" \
-  -d '{"action": {"action_type": "classify_document", "payload": {"document_type": "invoice"}}}'
+  -d '{"action": {"action_type": "classify_document", "payload": {"document_type": "receipt"}}}' \
+  | python -m json.tool
 
-# Extract fields
-curl -X POST http://localhost:7860/step \
+# Finish episode
+curl -s -X POST http://localhost:7860/step \
   -H "Content-Type: application/json" \
-  -d '{"action": {"action_type": "extract_fields", "payload": {"fields": {"vendor_name": "Blue Ocean Logistics Pte Ltd", "total_amount": "EUR 2,190.40", "date": "2024-01-15"}}}}'
-
-# Validate then finish
-curl -X POST http://localhost:7860/step \
-  -H "Content-Type: application/json" \
-  -d '{"action": {"action_type": "validate_fields", "payload": {"is_valid": true}}}'
-
-curl -X POST http://localhost:7860/step \
-  -H "Content-Type: application/json" \
-  -d '{"action": {"action_type": "finish", "payload": {}}}'
-
-# Get current state
-curl http://localhost:7860/state
-
-# List all tasks
-curl http://localhost:7860/tasks
-
-# Run full benchmark via API
-curl -X POST http://localhost:7860/benchmark \
-  -H "Content-Type: application/json" \
-  -d '{"seed": 42, "episodes_per_level": 3, "agent": "heuristic"}'
-```
-
----
-
-## Running Tests
-
-```bash
-# Install test dependencies (included in requirements.txt)
-pip install -r requirements.txt
-
-# Run full test suite
-pytest tests/ -v
-
-# Run with coverage
-pytest tests/ -v --cov=. --cov-report=term-missing
-
-# Run only environment tests
-pytest tests/test_env.py -v
-
-# Run only grader tests
-pytest tests/test_graders.py -v
-
-# Run only API tests
-pytest tests/test_api.py -v
-```
-
----
-
-## Generating Synthetic Data
-
-```bash
-# Generate 30 samples (default)
-python scripts/generate_dataset.py
-
-# Generate 100 samples with custom seed and output
-python scripts/generate_dataset.py --n 100 --seed 0 --output data/generated/documents.jsonl
+  -d '{"action": {"action_type": "finish", "payload": {}}}' \
+  | python -m json.tool
 ```
 
 ---
@@ -343,14 +212,14 @@ python scripts/generate_dataset.py --n 100 --seed 0 --output data/generated/docu
 ## Docker
 
 ```bash
-# Build
-docker build -t openenv-invoice .
+# Build image
+docker build -t openenv-invoice-receipt .
 
-# Run
-docker run -p 7860:7860 openenv-invoice
-
-# Run with OpenAI key
-docker run -p 7860:7860 -e OPENAI_API_KEY=sk-... openenv-invoice
+# Run container
+docker run --rm -p 7860:7860 \
+  -e DATA_ROOT=data \
+  -e SEED=42 \
+  openenv-invoice-receipt
 
 # Health check
 curl http://localhost:7860/health
@@ -358,39 +227,89 @@ curl http://localhost:7860/health
 
 ---
 
-## Hugging Face Spaces (Docker)
+## Inference
 
-This repository is ready for HF Docker Spaces:
-
-1. Create a new Space → SDK: **Docker**
-2. Push all files to the Space repository
-3. The space boots `uvicorn api.server:app` on port `7860`
-4. Add `OPENAI_API_KEY` as a Space secret if using the LLM agent
-
----
-
-## OpenEnv Spec
-
-Full environment metadata, task definitions, action/reward schema: [`openenv.yaml`](./openenv.yaml)
-
----
-
-## Optional: Image OCR Input
-
-Install Tesseract to enable image-based input:
+Requires environment variables `API_BASE_URL`, `MODEL_NAME`, and `HF_TOKEN`.
 
 ```bash
-pip install pytesseract Pillow
-# Windows: install Tesseract binary from https://github.com/UB-Mannheim/tesseract/wiki
-# Ubuntu:  sudo apt-get install tesseract-ocr
+# Set required variables
+export API_BASE_URL="https://api-inference.huggingface.co/v1"
+export MODEL_NAME="meta-llama/Meta-Llama-3.1-8B-Instruct"
+export HF_TOKEN="hf_..."
+
+# Run baseline inference (reproducible, seed=42)
+python inference.py --seed 42 --episodes 3 --output inference_results.json
+
+# View summary scores
+cat inference_results.json | python -m json.tool
 ```
 
-Then use the `env.image_processor` module:
+The script runs 3 episodes per difficulty level (9 total) and writes a
+structured JSON report to `inference_results.json`.
 
-```python
-from env.image_processor import ocr_from_file, is_ocr_available
+---
 
-if is_ocr_available():
-    text = ocr_from_file("path/to/invoice.jpg")
-    # Use text as ocr_text in your documents.jsonl
+## Pre-validation
+
+Run the compliance check before submission:
+
+```bash
+python prevalidate.py
+```
+
+Checks performed:
+- `openenv.yaml` present with all required fields
+- `api.reset`, `api.step`, `api.state` defined
+- `interfaces.step_returns` includes `observation`, `reward`, `done`, `info`
+- `reward.score_range` is `[0.0, 1.0]`
+- ≥3 tasks with `easy`, `medium`, `hard` difficulties
+- `reset()` returns valid `Observation` model
+- `step()` returns `(Observation, Reward, bool, dict)`
+- `grader_score` ∈ `[0.0, 1.0]`
+- All 3 difficulty pools have samples
+
+---
+
+## Baseline Results
+
+Heuristic baseline (no LLM, rule-based regex + keyword scoring):
+
+| Difficulty | Grader Score |
+|------------|-------------|
+| easy | 1.0000 |
+| medium | 0.9444 |
+| hard | 0.9111 |
+| **overall** | **0.9518** |
+
+---
+
+## Project Structure
+
+```
+.
+├── env/                    # Core OpenEnv environment
+│   ├── openenv_env.py      #   reset(), step(), state() implementation
+│   ├── dataset_loader.py   #   JSONL dataset loader
+│   └── reward.py           #   Step-level reward shaping
+├── models/
+│   └── schemas.py          # Pydantic models: Observation, Action, Reward
+├── tasks/
+│   └── task_definitions.py # Easy / medium / hard task definitions
+├── graders/
+│   └── scoring.py          # Deterministic grader (0.0–1.0)
+├── api/
+│   └── server.py           # FastAPI server (/reset, /step, /state)
+├── agent/
+│   ├── baseline_agent.py   # Heuristic agent + benchmark runner
+│   └── openai_agent.py     # LLM-powered agent (OpenAI-compatible)
+├── data/
+│   └── samples/
+│       └── documents.jsonl # 30 labelled invoice/receipt samples
+├── inference.py            # Baseline inference script (OpenEnv required)
+├── prevalidate.py          # Pre-submission compliance checker
+├── main.py                 # Server entrypoint
+├── openenv.yaml            # OpenEnv specification
+├── Dockerfile              # Container build definition
+├── requirements.txt        # Python dependencies
+└── .env.example            # Environment variable template
 ```

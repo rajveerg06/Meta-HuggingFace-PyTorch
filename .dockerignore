@@ -5,11 +5,11 @@ __pycache__/
 .Python
 .venv/
 venv/
-env/
 *.egg-info/
 dist/
 build/
 .eggs/
+.dist/
 
 # Testing
 .pytest_cache/
@@ -36,6 +36,7 @@ htmlcov/
 
 # Logs
 *.log
+inference_results.json
 
 # OS
 .DS_Store

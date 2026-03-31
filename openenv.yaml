@@ -1,14 +1,11 @@
-name: invoice_receipt_openenv
-version: 1.1.0
+name: invoice-receipt-openenv
+version: 1.2.0
 description: >
-  OpenEnv-compatible environment for invoice and receipt document understanding.
-  An AI agent processes OCR text from financial documents through a structured
-  classify → extract → validate → finish pipeline with deterministic grading.
-
-author: OpenEnv Contributors
+  OpenEnv Round 1 compliant environment for invoice and receipt document
+  understanding. Given OCR text of a financial document, an agent must
+  classify the document type, extract key fields, and validate the extraction.
+author: rajveerg06
 license: MIT
-homepage: https://huggingface.co/spaces/openenv/invoice-receipt
-
 entrypoint: env.openenv_env:OpenEnvInvoiceEnv
 
 api:
@@ -17,18 +14,39 @@ api:
   step: /step
   state: /state
   health: /health
-  tasks: /tasks
 
-observation:
+interfaces:
+  methods:
+    - reset
+    - step
+    - state
+  step_returns:
+    - observation
+    - reward
+    - done
+    - info
+
+models:
+  observation: models.schemas.Observation
+  action: models.schemas.Action
+  reward: models.schemas.Reward
+
+action_space:
+  type: Discrete
+  n: 4
+  actions:
+    - classify_document
+    - extract_fields
+    - validate_fields
+    - finish
+
+observation_space:
   fields:
     - sample_id
     - difficulty
     - ocr_text
     - predicted_document_type
-    - extracted_fields.vendor_name
-    - extracted_fields.total_amount
-    - extracted_fields.date
-    - extracted_fields.confidence
+    - extracted_fields
     - validation_passed
     - progress
     - steps_taken
@@ -38,109 +56,60 @@ observation:
     - done
     - info
 
-action_space:
-  type: Discrete
-  n: 4
-  actions:
-    - name: classify_document
-      payload:
-        document_type: "invoice | receipt"
-    - name: extract_fields
-      payload:
-        fields:
-          vendor_name: string
-          total_amount: string
-          date: string
-    - name: validate_fields
-      payload:
-        is_valid: bool
-    - name: finish
-      payload: {}
-
 reward:
-  range: [0.0, 1.0]
-  scoring:
-    - classification_accuracy
-    - extraction_accuracy
-    - completeness
-    - vendor_name_score
-    - total_amount_score
-    - date_score
-  reward_shaping:
-    correct_action: +0.2 to +0.5 (difficulty scaled)
-    incorrect_action: -0.1
-    loop_penalty: -0.05 per repeat
-    finish_bonus: 0.6 × grader_score
-    timeout_penalty: -0.1
-
-dataset:
-  sources:
-    - name: SROIE
-      description: Scanned Receipts OCR and Information Extraction dataset
-      url: https://rrc.cvc.uab.es/?ch=13
-    - name: Invoice Dataset
-      description: Synthetic and real-world invoice OCR dataset
-    - name: RVL-CDIP Subset
-      description: Ryerson Vision Lab Complex Document Information Processing
-      url: https://adamharley.com/rvl-cdip/
-  local_path: data/samples/documents.jsonl
-  format: jsonl
-  splits:
-    - train
-    - val
-    - test
-  total_samples: 30
-  samples_per_difficulty:
-    easy: 10
-    medium: 10
-    hard: 10
+  score_range: [0.0, 1.0]
+  shaping:
+    partial_progress: true
+    wrong_action_penalty: -0.1
+    loop_penalty_per_repeat: -0.05
+    invalid_step_penalty: -0.1
+    finish_bonus_multiplier: 0.6
 
 tasks:
   - id: classify-document
     difficulty: easy
-    objective: Classify whether the input document is an invoice or receipt.
-    required_actions:
-      - classify_document
-      - finish
-    grading:
-      classification_accuracy: 1.0
+    objective: >
+      Given OCR text of a financial document, classify whether it is an
+      invoice or a receipt. Models must apply document-type reasoning over
+      unstructured text containing keywords, formatting patterns, and layout cues.
+
   - id: extract-key-fields
     difficulty: medium
-    objective: Extract vendor name, total amount, and date from OCR text.
-    required_actions:
-      - extract_fields
-      - finish
-    grading:
-      extraction_accuracy: 0.8
-      completeness: 0.2
+    objective: >
+      Extract vendor name, total amount, and date from the OCR text of an
+      invoice or receipt. Models must handle varied formatting, currency symbols,
+      date formats, and noisy OCR artifacts from real-world documents.
+
   - id: full-pipeline
     difficulty: hard
-    objective: Classify document, extract key fields, and validate the extraction.
-    required_actions:
-      - classify_document
-      - extract_fields
-      - validate_fields
-      - finish
-    grading:
-      classification_accuracy: 0.4
-      extraction_accuracy: 0.4
-      completeness: 0.2
+    objective: >
+      Perform the complete document processing pipeline: classify document type,
+      extract all key fields (vendor name, total amount, date), and validate the
+      extraction for completeness and structural correctness. All steps must
+      succeed for maximum score.
 
-baseline_scores:
-  agent: heuristic
-  seed: 42
-  episodes_per_level: 3
-  easy: 1.0000
-  medium: 0.9444
-  hard: 0.9111
-  overall: 0.9518
-  note: Scores use rapidfuzz fuzzy vendor matching. Reproducible with seed=42.
+grader:
+  deterministic: true
+  output_range: [0.0, 1.0]
+  non_constant: true
+  scoring:
+    easy: classification_accuracy
+    medium: 0.8 * extraction_accuracy + 0.2 * completeness
+    hard: 0.4 * classification_accuracy + 0.4 * extraction_accuracy + 0.2 * completeness
 
-features:
-  - fuzzy_vendor_matching: true
-  - per_field_confidence: true  # LLM agents only
-  - multi_split_dataset: true
-  - openai_agent: true  # optional, requires OPENAI_API_KEY
-  - ocr_image_input: optional  # requires pytesseract + Tesseract binary
-  - docker_ready: true
-  - huggingface_spaces_ready: true
+inference:
+  script: inference.py
+  env_vars:
+    - API_BASE_URL
+    - MODEL_NAME
+    - HF_TOKEN
+
+runtime:
+  target_max_runtime_minutes: 20
+  cpu: 2
+  memory_gb: 8
+
+docker:
+  dockerfile: Dockerfile
+  port: 7860
+  healthcheck: /health
